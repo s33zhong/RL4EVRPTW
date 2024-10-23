@@ -274,13 +274,19 @@ class PointerAttention(nn.Module):
         # Compute inner multi-head attention with no projections.
         heads = self._inner_mha(query, key, value, attn_mask)
         glimpse = self._project_out(heads, attn_mask)
-
+        # print("Query: ", query)
+        # print("Key: ", key)
+        # print("Value: ", value)
+        # print("Logit Key: ", logit_key)
+        # print("Attention Mask: ", attn_mask.shape)
+        # print("Heads: ", heads)
+        # print("Glimpse: ", glimpse)
         # Batch matrix multiplication to compute logits (batch_size, num_steps, graph_size)
         # bmm is slightly faster than einsum and matmul
         logits = (torch.bmm(glimpse, logit_key.squeeze(-2).transpose(-2, -1))).squeeze(
             -2
         ) / math.sqrt(glimpse.size(-1))
-
+        # print(logits)
         if self.check_nan:
             assert not torch.isnan(logits).any(), "Logits contain NaNs"
 

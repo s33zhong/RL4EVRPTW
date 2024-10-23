@@ -20,6 +20,7 @@ def env_context_embedding(env_name: str, config: dict) -> nn.Module:
         "atsp": TSPContext,
         "cvrp": VRPContext,
         "cvrptw": VRPTWContext,
+        "evrptw": EVRPTWContext,
         "ffsp": FFSPContext,
         "svrp": SVRPContext,
         "sdvrp": VRPContext,
@@ -170,6 +171,27 @@ class VRPTWContext(VRPContext):
         capacity = super()._state_embedding(embeddings, td)
         current_time = td["current_time"]
         return torch.cat([capacity, current_time], -1)
+
+
+class EVRPTWContext(VRPContext):
+    """Context embedding for the Capacitated Vehicle Routing Problem (CVRP).
+    Project the following to the embedding space:
+        - current node embedding
+        - remaining capacity (vehicle_capacity - used_capacity)
+        - remaining fuel
+        - current time
+    """
+
+    def __init__(self, embed_dim):
+        super(VRPContext, self).__init__(
+            embed_dim=embed_dim, step_context_dim=embed_dim + 3
+        )
+
+    def _state_embedding(self, embeddings, td):
+        capacity = super()._state_embedding(embeddings, td)
+        current_time = td["current_time"]
+        current_fuel = td["current_fuel"]
+        return torch.cat([capacity, current_time, current_fuel], -1)
 
 
 class SVRPContext(EnvContext):

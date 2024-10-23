@@ -4,6 +4,8 @@ from rl4co.envs.routing.cvrp.env import CVRPEnv
 from rl4co.envs.routing.cvrp.generator import CVRPGenerator
 from rl4co.envs.routing.cvrptw.env import CVRPTWEnv
 from rl4co.envs.routing.cvrptw.generator import CVRPTWGenerator
+from rl4co.envs.routing.evrptw.env import EVRPTWEnv
+from rl4co.envs.routing.evrptw.generator import EVRPTWGenerator
 from rl4co.envs.routing.mdcpdp.env import MDCPDPEnv
 from rl4co.envs.routing.mdcpdp.generator import MDCPDPGenerator
 from rl4co.envs.routing.mtsp.env import MTSPEnv
@@ -22,3 +24,4 @@ from rl4co.envs.routing.svrp.env import SVRPEnv
 from rl4co.envs.routing.svrp.generator import SVRPGenerator
 from rl4co.envs.routing.tsp.env import DenseRewardTSPEnv, TSPEnv, TSPkoptEnv
 from rl4co.envs.routing.tsp.generator import TSPGenerator
+

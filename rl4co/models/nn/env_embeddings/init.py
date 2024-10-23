@@ -21,6 +21,7 @@ def env_init_embedding(env_name: str, config: dict) -> nn.Module:
         "matnet": MatNetInitEmbedding,
         "cvrp": VRPInitEmbedding,
         "cvrptw": VRPTWInitEmbedding,
+        "evrptw": EVRPTWInitEmbedding,
         "svrp": SVRPInitEmbedding,
         "sdvrp": VRPInitEmbedding,
         "pctsp": PCTSPInitEmbedding,
@@ -150,6 +151,29 @@ class VRPTWInitEmbedding(VRPInitEmbedding):
             )
         )
         return torch.cat((depot_embedding, node_embeddings), -2)
+
+
+class EVRPTWInitEmbedding(VRPInitEmbedding):
+    def __init__(self, embed_dim, linear_bias=True, node_dim: int = 6):
+        # node_dim = 6: x, y, demand, tw start, tw end, service time
+        super(EVRPTWInitEmbedding, self).__init__(embed_dim, linear_bias, node_dim)
+        self.init_embed_station = nn.Linear(2, embed_dim, linear_bias)
+
+    def forward(self, td):
+        num_stations = td["stations"].shape[-2]
+        depot, cities = td["locs"][:, :1, :],  td["locs"][:, 1:-num_stations, :]
+        stations = td["stations"]
+        durations = td["durations"][..., 1:-num_stations]
+        time_windows = td["time_windows"][..., 1:-num_stations, :]
+        # embeddings
+        depot_embedding = self.init_embed_depot(depot)
+        station_embeddings = self.init_embed_station(stations)
+        node_embeddings = self.init_embed(
+            torch.cat(
+                (cities, td["demand"][..., None], time_windows, durations[..., None]), -1
+            )
+        )
+        return torch.cat((depot_embedding, node_embeddings, station_embeddings), -2)
 
 
 class SVRPInitEmbedding(nn.Module):
