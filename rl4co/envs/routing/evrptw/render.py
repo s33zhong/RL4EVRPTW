@@ -44,14 +44,15 @@ def render(td, actions=None, ax=None):
     else:
         locs = locs
 
-    # min_vals = locs.min(dim=1, keepdim=True)[0]  # Keep dimension for broadcasting
-    # max_vals = locs.max(dim=1, keepdim=True)[0]
+    min_vals = locs.min(dim=1, keepdim=True)[0]  # Keep dimension for broadcasting
+    max_vals = locs.max(dim=1, keepdim=True)[0]
 
-    # locs_scaled = (locs - min_vals) / (max_vals - min_vals)
+    locs_scaled = (locs - min_vals) / (max_vals - min_vals)
 
     # Cat the first node to the end to complete the tour
     x, y = locs[:, 0], locs[:, 1]
-
+    num_station = td["stations"].size(0)
+    
     # plot depot
     ax.scatter(
         locs[0, 0],
@@ -66,8 +67,8 @@ def render(td, actions=None, ax=None):
 
     # plot visited nodes
     ax.scatter(
-        x[1:],
-        y[1:],
+        x[1:-num_station],
+        y[1:-num_station],
         edgecolors=cm.Set2(0),
         facecolors="none",
         s=50,
@@ -75,31 +76,44 @@ def render(td, actions=None, ax=None):
         marker="o",
         alpha=1,
     )
+    
+    # plot station nodes
+    ax.scatter(
+    x[-num_station:],
+    y[-num_station:],
+    edgecolors=cm.Set2(1),
+    facecolors="none",
+    s=50,
+    linewidths=2,
+    marker="^",
+    alpha=1,
+)
+
 
     # plot demand bars
-    for node_idx in range(1, len(locs)):
-        ax.add_patch(
-            plt.Rectangle(
-                (locs[node_idx, 0] - 0.005, locs[node_idx, 1] + 0.015),
-                0.01,
-                demands[node_idx - 1] / (scale_demand * 10),
-                edgecolor=cm.Set2(0),
-                facecolor=cm.Set2(0),
-                fill=True,
-            )
-        )
+    # for node_idx in range(1, len(locs)-num_station):
+    #     ax.add_patch(
+    #         plt.Rectangle(
+    #             (locs[node_idx, 0] - 0.005, locs[node_idx, 1] + 0.015),
+    #             0.01,
+    #             demands[node_idx - 1] / (scale_demand * 10),
+    #             edgecolor=cm.Set2(0),
+    #             facecolor=cm.Set2(0),
+    #             fill=True,
+    #         )
+    #     )
 
-    # text demand
-    for node_idx in range(1, len(locs)):
-        ax.text(
-            locs[node_idx, 0],
-            locs[node_idx, 1] - 0.025,
-            f"{demands[node_idx-1].item():.2f}",
-            horizontalalignment="center",
-            verticalalignment="top",
-            fontsize=10,
-            color=cm.Set2(0),
-        )
+    # # text demand
+    # for node_idx in range(1, len(locs)-num_station):
+    #     ax.text(
+    #         locs[node_idx, 0],
+    #         locs[node_idx, 1] - 0.025,
+    #         f"{demands[node_idx-1].item():.2f}",
+    #         horizontalalignment="center",
+    #         verticalalignment="top",
+    #         fontsize=10,
+    #         color=cm.Set2(0),
+    #     )
 
     # text depot
     ax.text(
@@ -141,5 +155,5 @@ def render(td, actions=None, ax=None):
     min_y = flattened_locs[:, 1].min().item()
     max_y = flattened_locs[:, 1].max().item()
 
-    ax.set_xlim(min_x-0.05, max_x+0.05)
-    ax.set_ylim(min_y-0.05, max_y+0.05)
+    # ax.set_xlim(min_x-0.05, max_x+0.05)
+    # ax.set_ylim(min_y-0.05, max_y+0.05)
