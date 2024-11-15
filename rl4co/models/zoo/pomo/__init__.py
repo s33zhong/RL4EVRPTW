@@ -1,1 +1,1 @@
-from .model import POMO
+from .model import POMO, RewardConstrainedPOMO

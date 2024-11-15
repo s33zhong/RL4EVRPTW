@@ -195,17 +195,22 @@ class EVRPTWEnv(CVRPEnv):
 
         time_to_loc = distance / td["vehicle_speed"]  # Time to reach the location
 
-        start_times = gather_by_index(td["time_windows"], td["action"])[..., 0].reshape(
-            [batch_size, 1]
-        )
+        start_times = gather_by_index(td["time_windows"], td["action"])[..., 0].reshape([batch_size, 1])
+        end_times = gather_by_index(td["time_windows"], td["action"])[..., 1].reshape([batch_size, 1])
         current_time = torch.where(is_depot,
                                    self.generator.min_time,  # Reset time to 0 at depot
                                    torch.max(td["current_time"] + time_to_loc, start_times) + duration)
+        
+        # Calculate time penalty: if current_time exceeds end_time, compute the violation amount
+        penalty_time = torch.max(torch.zeros_like(current_time), current_time - end_times).sum(dim=1, keepdim=True)
 
         # If visiting a station, replenish the fuel to max fuel, otherwise deduct fuel based on distance
         current_fuel = torch.where((is_station | is_depot),
                                    self.generator.max_fuel,  # Full fuel replenishment at station
                                    td["current_fuel"] - distance)  # Deduct fuel based on distance traveled)
+        
+        # Calculate battery penalty: if current_fuel goes below zero, compute the violation amount
+        penalty_battery = torch.max(torch.zeros_like(current_fuel), -current_fuel).sum(dim=1, keepdim=True)
 
         # current_node is updated to the selected action
         current_node = td["action"][:, None]  # Add dimension for step
@@ -221,6 +226,9 @@ class EVRPTWEnv(CVRPEnv):
         used_capacity = torch.where(is_depot,
                                     0.0,
                                     (td["used_capacity"] + selected_demand)).float()
+
+        # Calculate cargo penalty: if used_capacity exceeds vehicle capacity, compute the violation amount
+        penalty_cargo = torch.max(torch.zeros_like(used_capacity), used_capacity - td["vehicle_capacity"]).sum(dim=1, keepdim=True)
 
         # Note: here we do not subtract one as we have to scatter so the first column allows scattering depot
         # Add one dimension since we write a single value
@@ -268,6 +276,9 @@ class EVRPTWEnv(CVRPEnv):
                 "finished": finished,
                 "reward": reward,
                 "done": done,
+                "penalty_time": penalty_time,
+                "penalty_battery": penalty_battery,
+                "penalty_cargo": penalty_cargo,
             }
         )
         td.set("action_mask", self.get_action_mask(td))
@@ -333,6 +344,39 @@ class EVRPTWEnv(CVRPEnv):
         # print(ev_cost.squeeze())
         return negative_tour_length + ev_cost.squeeze()
 
+    def calculate_time_penalty(self, info):
+        """Calculate penalty for time window violations."""
+        current_time = info["current_time"]
+        time_windows = info["time_windows"]
+
+        # Calculate if the current time exceeds the allowed time window at the current location
+        start_time, end_time = time_windows[..., 0], time_windows[..., 1]
+        time_violations = torch.max(torch.zeros_like(current_time), current_time - end_time)
+        penalty_time = time_violations.sum()
+        
+        return penalty_time
+
+    def calculate_battery_penalty(self, info):
+        """Calculate penalty for battery constraint violations."""
+        current_fuel = info["current_fuel"]
+
+        # If fuel is below 0, calculate the penalty as the absolute deficit
+        fuel_deficit = torch.max(torch.zeros_like(current_fuel), -current_fuel)
+        penalty_battery = fuel_deficit.sum()
+        
+        return penalty_battery
+
+    def calculate_cargo_penalty(self, info):
+        """Calculate penalty for cargo capacity violations."""
+        used_capacity = info["used_capacity"]
+        vehicle_capacity = info["vehicle_capacity"]
+
+        # If capacity is exceeded, calculate the penalty as the excess load
+        cargo_excess = torch.max(torch.zeros_like(used_capacity), used_capacity - vehicle_capacity)
+        penalty_cargo = cargo_excess.sum()
+        
+        return penalty_cargo
+    
     @staticmethod
     def check_solution_validity(td: TensorDict, actions: torch.Tensor) -> None:
         # print("Actions are: ", actions)
