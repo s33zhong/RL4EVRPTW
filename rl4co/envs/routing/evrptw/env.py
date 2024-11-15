@@ -130,37 +130,49 @@ class EVRPTWEnv(CVRPEnv):
         exceeds_cap = td["demand"] + td["used_capacity"] > td["vehicle_capacity"]
 
         current_loc = gather_by_index(td["locs"], td["current_node"])
-        dist = get_distance(current_loc[..., None, :], td["locs"])
-        exceeds_time = td["current_time"] + dist > td["time_windows"][..., 1]
-        exceeds_fuel = td["current_fuel"] - dist < 0
+        # Calculate the distance to each location
+        dist_to_loc = get_distance(current_loc[..., None, :], td["locs"])
+        # Calculate the time to each location
+        time_to_loc = dist_to_loc / td["vehicle_speed"]
+
+        exceeds_time = td["current_time"] + time_to_loc > td["time_windows"][..., 1]
+        exceeds_fuel = td["current_fuel"] - dist_to_loc < 0
         # Nodes that cannot be visited are already visited or too much demand to be served now
         station_index = td["locs"].shape[-2] - td["stations"].shape[-2]
         num_station = td["stations"].shape[-2]
+
         mask_loc = (td["visited"].to(exceeds_cap.dtype)
                     | exceeds_cap
                     | exceeds_time[..., 1:station_index]
                     | exceeds_fuel[..., 1:station_index])
         unserved_reachable = ((mask_loc == 0).int().sum(-1) > 0)[:, None]
+        # print("Unserved reachable: ", unserved_reachable)
+
         # Cannot visit the depot if there are unserved nodes reachable and the vehicle limit is reached
         mask_depot = (unserved_reachable
                       | exceeds_fuel[..., None, 0]
                       | exceeds_time[..., None, 0]).to(mask_loc.dtype)
-        # Cannot visit the station if just visited a station and still unserved nodes reachable
+        # Cannot visit a station if just visited a station and still unserved nodes reachable
         mask_station = ((td["current_node"] >= station_index & unserved_reachable)
                         | exceeds_fuel[..., station_index:]
                         | exceeds_time[..., station_index:])
         mask_station = mask_station.expand(-1, num_station).to(mask_loc.dtype)  # Expand to match the number of stations
 
         not_masked = ~torch.cat((mask_depot, mask_loc, mask_station), -1)
-        # Mask the current node (whether depot, station, or regular location)
-        not_masked = not_masked.scatter(1, td["current_node"], 0)
-        td.update({"current_loc": current_loc, "distances": dist})
 
-        # print("exceeds_time: ", exceeds_time)
-        # print("exceeds_fuel: ", exceeds_fuel)
-        # print("exceeds_cap: ", exceeds_cap)
-        # print("not_masked: ", not_masked)
-        # print("mask_depot: ", mask_depot, "mask_loc: ", mask_loc, "mask_station: ", mask_station)
+        # Mask the current node (whether station, or regular location)
+        # Get indices for rows where `td["current_node"]` is not 0
+        non_zero_mask = td["current_node"] != 0
+        indices_to_scatter = td["current_node"][non_zero_mask]
+        # Select rows where td["current_node"] is not 0
+        rows = torch.arange(td["current_node"].size(0))[non_zero_mask.squeeze().cpu()]
+
+        # Scatter 0 at specified indices in not_masked
+        not_masked[rows, indices_to_scatter.squeeze(-1)] = 0
+
+        td.update({"current_loc": current_loc, "distances": dist_to_loc})
+        # print(f"visitable: {not_masked}, visited: {td['visited']}, current node: {td['current_node']}")
+
         return not_masked
 
     def _step(self, td: TensorDict) -> TensorDict:
@@ -169,10 +181,8 @@ class EVRPTWEnv(CVRPEnv):
         The current_node is updated in the parent class' _step() function.
         """
         batch_size = td["locs"].shape[0]
-        # print(td["action"])
         # Check if the action is visiting a station
         station_index = td["locs"].shape[-2] - td["stations"].shape[-2]
-        # print("Station index: ", station_index)
         is_station = td["action"][:, None] >= station_index
         is_depot = td["action"][:, None] == 0
 
@@ -181,26 +191,21 @@ class EVRPTWEnv(CVRPEnv):
         # update current_time
         distance = gather_by_index(td["distances"], td["action"]).reshape([batch_size, 1])
         duration = gather_by_index(td["durations"], td["action"]).reshape([batch_size, 1])
-        duration = torch.where(is_station,
-                               charging_percentage*duration, # Recharge time at station
-                               duration)
+        duration[is_station] *= charging_percentage[is_station]  # Recharge time at station
+
+        time_to_loc = distance / td["vehicle_speed"]  # Time to reach the location
 
         start_times = gather_by_index(td["time_windows"], td["action"])[..., 0].reshape(
             [batch_size, 1]
         )
         current_time = torch.where(is_depot,
                                    self.generator.min_time,  # Reset time to 0 at depot
-                                   torch.max(td["current_time"] + distance, start_times) + duration)
+                                   torch.max(td["current_time"] + time_to_loc, start_times) + duration)
 
         # If visiting a station, replenish the fuel to max fuel, otherwise deduct fuel based on distance
         current_fuel = torch.where((is_station | is_depot),
                                    self.generator.max_fuel,  # Full fuel replenishment at station
                                    td["current_fuel"] - distance)  # Deduct fuel based on distance traveled)
-
-        # If visiting a depot, deduct one from current vehicle limit
-        current_limit = torch.where(is_depot,
-                                    td["current_limit"] - 1,
-                                    td["current_limit"])
 
         # current_node is updated to the selected action
         current_node = td["action"][:, None]  # Add dimension for step
@@ -224,20 +229,33 @@ class EVRPTWEnv(CVRPEnv):
         # Create a mask tensor where it is 1 if current_node is within the range of visited, 0 otherwise
         valid_mask = (current_node > 0) & (current_node <= visited.size(-1))
 
-        # Create a tensor to apply updates, but only update where valid_mask is 1
+        # Set update_tensor values to 1 at the specified positions
         update_tensor = torch.zeros_like(visited)
-        update_tensor.scatter_(-1, current_node[valid_mask].unsqueeze(-1)-1, 1)
+
+        # update_tensor.scatter_(-1, current_node[valid_mask].unsqueeze(-1)-1, 1)
+        rows = torch.arange(valid_mask.size(0))[valid_mask.squeeze(-1).cpu()]
+        cols = (current_node[valid_mask] - 1).squeeze(-1)
+        update_tensor[rows, cols] = 1
 
         # Perform element-wise max to get the resulting visited tensor
         visited = torch.max(visited, update_tensor)
-        finished = visited.sum(-1) == visited.size(-1)  # visited all customers
+
+        # Considered finished, if visited all customers
+        finished = visited.sum(-1) == visited.size(-1)
+
         # SECTION: get done
-        returned = torch.where(is_depot & finished,
-                               1,
-                               0)
-        done = finished & returned
-        # print("Done: ", done)
-        reward = torch.zeros_like(done) - 1
+        done = finished & is_depot.squeeze()
+        reward = torch.zeros_like(done)
+
+        # If visiting a depot, deduct one from current vehicle limit if it is not done
+        current_limit = td["current_limit"]
+
+        # Setting a hard limit (minus 10) to vehicles; if limit is reached, the instance has failed and thus done
+        done = done | (current_limit <= -10).squeeze()
+
+        # If depot is visited, deduct one from the limit if not done yet; we allow the vehicle to remain in depot
+        #    if it has finished all its tasks, or it has already failed
+        current_limit[is_depot & ~done.unsqueeze(1)] -= 1
 
         td.update(
             {
@@ -248,10 +266,8 @@ class EVRPTWEnv(CVRPEnv):
                 "used_capacity": used_capacity,
                 "visited": visited,
                 "finished": finished,
-                "returned": returned,
                 "reward": reward,
                 "done": done,
-
             }
         )
         td.set("action_mask", self.get_action_mask(td))
@@ -269,6 +285,9 @@ class EVRPTWEnv(CVRPEnv):
                 "demand": td["demand"],
                 "current_node": torch.zeros(
                     *batch_size, 1, dtype=torch.long, device=device
+                ),
+                "vehicle_speed": torch.full(
+                    (*batch_size, 1), self.generator.vehicle_speed, device=device
                 ),
                 "current_time": torch.zeros(
                     *batch_size, 1, dtype=torch.float32, device=device
@@ -302,15 +321,22 @@ class EVRPTWEnv(CVRPEnv):
         td_reset.set("action_mask", self.get_action_mask(td_reset))
         return td_reset
 
-    def _get_reward(self, td: TensorDict, actions: torch.Tensor) -> torch.Tensor:
-        """The reward is the negative tour length. Time windows
-        are not considered for the calculation of the reward."""
-        return super()._get_reward(td, actions)
+    def _get_reward(self, td: TensorDict, actions: torch.Tensor, beta_1: int = 1) -> torch.Tensor:
+        """The reward is the negative tour length minus the cost
+        of invoking additional EVs (beyond limit)."""
+        # Energy consumption which is proportional to the distance traveled
+        negative_tour_length = super()._get_reward(td, actions)
+        # Cost of invoking additional EVs beyond EV limit
+        ev_cost = beta_1 * torch.clamp(td['current_limit'], max=0)
+
+        # print(negative_tour_length.shape, ev_cost.shape, td['current_limit'].shape)
+        # print(ev_cost.squeeze())
+        return negative_tour_length + ev_cost.squeeze()
 
     @staticmethod
     def check_solution_validity(td: TensorDict, actions: torch.Tensor) -> None:
-        print("Actions are: ", actions)
-        print("To be implemented.")
+        # print("Actions are: ", actions)
+        # print("To be implemented.")
         # CVRPEnv.check_solution_validity(td, actions)
         # batch_size = td["locs"].shape[0]
         # # distances to depot
@@ -359,6 +385,7 @@ class EVRPTWEnv(CVRPEnv):
         #     )
         #     curr_node = next_node
         #     curr_time[curr_node == 0] = 0.0  # reset time for depot
+        return
 
     @staticmethod
     def render(td: TensorDict, actions: torch.Tensor = None, ax=None):

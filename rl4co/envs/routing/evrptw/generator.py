@@ -45,7 +45,7 @@ class EVRPTWGenerator(CVRPGenerator):
             self,
             num_loc: int = 20,
             min_loc: float = 0.0,
-            max_loc: float = 150.0,
+            max_loc: float = 1.0,
             loc_distribution: Union[
                 int, float, str, type, Callable
             ] = Uniform,
@@ -56,19 +56,19 @@ class EVRPTWGenerator(CVRPGenerator):
             station_distribution: Union[
                 int, float, str, type, Callable
             ] = Uniform,
-            min_demand: int = 1,
-            max_demand: int = 10,
+            min_demand: float = 0.05,
+            max_demand: float = 0.30,
             demand_distribution: Union[
                 int, float, type, Callable
             ] = Uniform,
             vehicle_capacity: float = 1.0,
             vehicle_limit: int = 10,
-            max_fuel: float = 500,
-            fuel_consumption_rate: float = 1.0,
-            inverse_recharge_rate: float = 1.0,
-            capacity: float = None,
-            max_time: float = 480,
-            horizon: float = 480,
+            vehicle_speed: float = 2,
+            max_fuel: float = 1,
+            fuel_consumption_rate: float = 0.2,
+            inverse_recharge_rate: float = 0.25,
+            max_time: float = 1,
+            horizon: float = 1,
             scale: bool = False,
             **kwargs,
     ):
@@ -78,16 +78,16 @@ class EVRPTWGenerator(CVRPGenerator):
             max_loc=max_loc,
             loc_distribution=loc_distribution,
             depot_distribution=depot_distribution,
-            min_demand=min_demand,
-            max_demand=max_demand,
             demand_distribution=demand_distribution,
             vehicle_capacity=vehicle_capacity,
-            capacity=capacity,
             **kwargs,
         )
         self.max_loc = max_loc
         self.vehicle_limit = vehicle_limit
+        self.vehicle_speed = vehicle_speed
         self.min_time = 0.0
+        self.min_demand = min_demand
+        self.max_demand = max_demand
         self.num_station = num_station
         self.max_time = max_time
         self.horizon = horizon
@@ -116,11 +116,11 @@ class EVRPTWGenerator(CVRPGenerator):
         station = self.station_sampler.sample((*batch_size, self.num_station, 2)) \
             if self.station_sampler is not None and self.num_station != 0 else None
 
-        # Sample demands
-        demand = self.demand_sampler.sample((*batch_size, self.num_loc))
-        demand = (demand.int() + 1).float()
+        # Sample demands and scale to [min_demand, max_demand]
+        demand = (self.min_demand + (self.max_demand - self.min_demand) *
+                  torch.rand(*batch_size, self.num_loc))
 
-        # Sample capacities
+        # Create capacities
         capacity = torch.full((*batch_size, 1), self.capacity)
 
         ## define service durations
@@ -136,66 +136,35 @@ class EVRPTWGenerator(CVRPGenerator):
         customer_dist = get_distance(depot, customer.transpose(0, 1)).transpose(0, 1)
         station_dist = get_distance(depot, station.transpose(0, 1)).transpose(0, 1)
         dist = torch.cat((torch.zeros(*batch_size, 1), customer_dist, station_dist), dim=1)  # 0 being the depot,
-        # 1 ~ num_loc being the customers, num_loc+1 ~ num_loc+1+num_station being the customers
+            # 1 ~ num_loc being the customers, num_loc+1 ~ num_loc+1+num_station being the customers
 
         # 2. define upper bound for time windows to make sure the vehicle can get back to the depot in time
-        upper_bound = self.max_time - dist - durations
+        upper_bound = self.max_time - dist/self.vehicle_speed - durations
 
-        # 3. create random values between 0 and 1
-        ts_1 = torch.rand(*batch_size, self.num_loc + self.num_station + 1)
-        ts_2 = torch.rand(*batch_size, self.num_loc + self.num_station + 1)
+        # 3. create two random values between 0 and 1 for time windows, and scale them to their upper bound
+        tw_1 = torch.rand(*batch_size, self.num_loc + self.num_station + 1) * upper_bound
+        tw_2 = torch.rand(*batch_size, self.num_loc + self.num_station + 1) * upper_bound
 
-        # 4. scale values to lie between their respective min_time and max_time and convert to integer values
-        min_ts = (dist + (upper_bound - dist) * ts_1).int()
-        max_ts = (dist + (upper_bound - dist) * ts_2).int()
+        # 4. set the lower value to min, the higher to max
+        min_times = torch.clamp(torch.min(tw_1-0.05, tw_2-0.05), min=0)
+        max_times = torch.clamp(torch.max(tw_1+0.05, tw_2+0.05), max=upper_bound)
 
-        # 5. set the lower value to min, the higher to max
-        min_times = torch.min(min_ts, max_ts)
-        max_times = torch.max(min_ts, max_ts)
-
-        # 6. reset times for depot and stations
+        # 5. set times for depot and stations; make them always available
         min_times[..., :, 0] = 0.0
         min_times[..., :, -self.num_station:] = 0.0
         max_times[..., :, 0] = self.horizon
         max_times[..., :, -self.num_station:] = self.horizon
 
-        # 7. ensure min_times < max_times to prevent numerical errors in attention.py
-        # min_times == max_times may lead to nan values in _inner_mha()
-        mask = min_times == max_times
-        if torch.any(mask):
-            min_tmp = min_times.clone()
-            min_tmp[mask] = torch.max(
-                dist[mask].int(), min_tmp[mask] - 1
-            )  # we are handling integer values, so we can simply substract 1
-            min_times = min_tmp
-
-            mask = min_times == max_times  # update mask to new min_times
-            if torch.any(mask):
-                max_tmp = max_times.clone()
-                max_tmp[mask] = torch.min(
-                    torch.floor(upper_bound[mask]).int(),
-                    torch.max(
-                        torch.ceil(min_tmp[mask] + durations[mask]).int(),
-                        max_tmp[mask] + 1,
-                    ),
-                )
-                max_times = max_tmp
-
-        # Scale to [0, 1]
-        if self.scale:
-            durations = durations / self.horizon
-            min_times = min_times / self.horizon
-            max_times = max_times / self.horizon
-            depot = depot / self.horizon
-            customer = customer / self.horizon
-            station = station / self.horizon
-
-        # 8. stack to tensor time_windows
+        # 6. stack to tensor time_windows
         time_windows = torch.stack((min_times, max_times), dim=-1)
 
         assert torch.all(
             min_times < max_times
         ), "Please make sure the relation between max_loc and max_time allows for feasible solutions."
+
+        assert torch.all(
+            0 <= min_times
+        ), "Please make sure the time windows are non-negative."
 
         # Reset duration at depot to 0
         durations[:, 0] = 0.0
@@ -210,7 +179,7 @@ class EVRPTWGenerator(CVRPGenerator):
                 "locs": locs,
                 "depot": depot,
                 "stations": station,
-                "demand": demand / self.capacity,
+                "demand": demand,
                 "capacity": capacity,
                 "durations": durations,
                 "time_windows": time_windows,
