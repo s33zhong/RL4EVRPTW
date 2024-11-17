@@ -57,7 +57,7 @@ class EVRPTWGenerator(CVRPGenerator):
                 int, float, str, type, Callable
             ] = Uniform,
             min_demand: float = 0.05,
-            max_demand: float = 0.30,
+            max_demand: float = 0.20,
             demand_distribution: Union[
                 int, float, type, Callable
             ] = Uniform,
@@ -65,7 +65,7 @@ class EVRPTWGenerator(CVRPGenerator):
             vehicle_limit: int = 10,
             vehicle_speed: float = 2,
             max_fuel: float = 1,
-            fuel_consumption_rate: float = 0.2,
+            fuel_consumption_rate: float = 0.25,
             inverse_recharge_rate: float = 0.25,
             max_time: float = 1,
             horizon: float = 1,
@@ -139,15 +139,17 @@ class EVRPTWGenerator(CVRPGenerator):
             # 1 ~ num_loc being the customers, num_loc+1 ~ num_loc+1+num_station being the customers
 
         # 2. define upper bound for time windows to make sure the vehicle can get back to the depot in time
-        upper_bound = self.max_time - dist/self.vehicle_speed - durations
+
+        lower_bound = dist/self.vehicle_speed
+        upper_bound = torch.max(self.horizon - dist/self.vehicle_speed - durations, lower_bound)
 
         # 3. create two random values between 0 and 1 for time windows, and scale them to their upper bound
         tw_1 = torch.rand(*batch_size, self.num_loc + self.num_station + 1) * upper_bound
         tw_2 = torch.rand(*batch_size, self.num_loc + self.num_station + 1) * upper_bound
 
         # 4. set the lower value to min, the higher to max
-        min_times = torch.clamp(torch.min(tw_1-0.05, tw_2-0.05), min=0)
-        max_times = torch.clamp(torch.max(tw_1+0.05, tw_2+0.05), max=upper_bound)
+        max_times = torch.clamp(torch.max(tw_1+0.05, tw_2+0.05), max=upper_bound, min=lower_bound)
+        min_times = torch.clamp(torch.min(tw_1-0.05, tw_2-0.05), max=max_times, min=torch.zeros_like(max_times))
 
         # 5. set times for depot and stations; make them always available
         min_times[..., :, 0] = 0.0

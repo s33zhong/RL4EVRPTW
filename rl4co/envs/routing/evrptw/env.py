@@ -332,7 +332,8 @@ class EVRPTWEnv(CVRPEnv):
         td_reset.set("action_mask", self.get_action_mask(td_reset))
         return td_reset
 
-    def _get_reward(self, td: TensorDict, actions: torch.Tensor, beta_1: int = 1) -> torch.Tensor:
+    def _get_reward(self, td: TensorDict, actions: torch.Tensor,
+                    beta_1: int = 1, beta_2: int = 10000) -> torch.Tensor:
         """The reward is the negative tour length minus the cost
         of invoking additional EVs (beyond limit)."""
         # Energy consumption which is proportional to the distance traveled
@@ -340,9 +341,13 @@ class EVRPTWEnv(CVRPEnv):
         # Cost of invoking additional EVs beyond EV limit
         ev_cost = beta_1 * torch.clamp(td['current_limit'], max=0)
 
+        # Cost of not visiting all customers
+        unvisited = torch.sum(~td["visited"].bool(), dim=1)
+        unvisited_cost = -beta_2 * unvisited
+
         # print(negative_tour_length.shape, ev_cost.shape, td['current_limit'].shape)
         # print(ev_cost.squeeze())
-        return negative_tour_length + ev_cost.squeeze()
+        return negative_tour_length + ev_cost.squeeze() + unvisited_cost.squeeze()
 
     def calculate_time_penalty(self, info):
         """Calculate penalty for time window violations."""
