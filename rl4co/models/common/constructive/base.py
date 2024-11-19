@@ -247,7 +247,7 @@ class ConstructivePolicy(nn.Module):
 
         # Output dictionary construction
         if calc_reward:
-            td.set("reward", env.get_reward(td, actions))
+            td.set("reward", env.get_reward(td, actions, train = True if phase=='train' else False))
 
         outdict = {
             "reward": td["reward"],

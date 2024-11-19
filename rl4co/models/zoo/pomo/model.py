@@ -165,7 +165,7 @@ class RewardConstrainedPOMO(REINFORCE):
         feats: list = None,
         num_starts: int = None,
         constraint_thresholds: dict = {"time": 1.0, "battery": 1.0, "cargo": 1.0},
-        lambda_lrs: dict = {"time": 0.01, "battery": 0.01, "cargo": 0.01},
+        lambda_lrs: dict = {"time": 5e-5, "battery": 5e-5, "cargo": 5e-5},
         **kwargs,
     ):
         self.save_hyperparameters(logger=False)
