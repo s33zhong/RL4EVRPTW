@@ -11,6 +11,8 @@ log = get_pylogger(__name__)
 
 
 def render(td, actions=None, ax=None, arr_col=None):
+    if actions[0] != 0:
+        actions = torch.cat((torch.tensor([0]), actions))
     num_routine = (actions == 0).sum().item() + 2
     base = colormaps["nipy_spectral"]
     color_list = base(np.linspace(0, 1, num_routine))
