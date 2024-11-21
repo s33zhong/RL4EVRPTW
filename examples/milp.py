@@ -213,3 +213,46 @@ def batch_milp(td, env, num_loc, num_station, num_ev, save=True, timelimit=60):
         torch.save(actions, path.join("save_milp", filename))
         
     return num_loc, num_station, num_ev, num_feasibles, -mean_reward, avg_runtime
+
+def check_actions_with_mask(td, env, actions, display_errors=False):
+    check_count=0
+    def check_visited(td, actions, batch_index):
+        td_test = td[batch_index: batch_index+1].clone()
+        for id, action in enumerate(actions[1:], start=1):
+            # skip multiple visit to same nodes, likely stations
+            if actions[id]==actions[id-1]:
+                continue
+            # skip check when visit depot or station
+            if action==0 or action>td['demand'].shape[-1] or td_test['action_mask'][0][action].item():
+                td_test['action'] = torch.tensor([action.item()])
+                td_test = env.step(td_test)['next'] 
+            else:
+                if display_errors:
+                    c_time = td_test['current_time'].item()
+                    time_to_go = (td_test['distances'][0][action]/td_test['vehicle_speed']).item()
+                    print(f"Current Time: {c_time:.9f} ", 
+                        f"Need: {time_to_go:.9f}",
+                        f"Reach: {c_time+time_to_go:.9f}")
+                    print("Time Windows", td_test['time_windows'][0][action].tolist())
+                    print("Current Fuel", f"{td_test['current_fuel'].item()}")
+                    print("Current Capacity", 
+                        f"{td_test['vehicle_capacity'].item()-td_test['used_capacity'].item()}")
+                break
+        return td_test['finished'], id
+
+    invalid_results = []
+    for k, act in actions.items():
+        if act.tolist().count(0)<=env.generator.vehicle_limit:
+            check_count+=1
+            success, fail_id = check_visited(td, act, k)
+            if not success:
+                invalid_results.append(k)
+                print(f"Fail at instance {k} at node {act[fail_id]}")
+    print(f"Checked {check_count} results")
+    if check_count>0 and len(invalid_results)==0:
+        print("All results are valid.")
+    elif check_count==0:
+        print("No feasible results to check.")
+    else:
+        print("Invalid instances:", " ".join(map(str, invalid_results)))
+
