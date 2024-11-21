@@ -94,6 +94,8 @@ class EVRPTWGenerator(CVRPGenerator):
         self.scale = scale
         self.max_fuel = max_fuel/fuel_consumption_rate
         self.recharge_time = max_fuel * inverse_recharge_rate
+        self.fuel_consumption_rate = fuel_consumption_rate
+        self.inverse_recharge_rate = inverse_recharge_rate
         # Depot distribution
         if kwargs.get("station_distribution", None) is not None:
             self.station_sampler = kwargs["station_distribution"]
