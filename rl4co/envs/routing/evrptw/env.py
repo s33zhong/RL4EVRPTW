@@ -186,10 +186,9 @@ class EVRPTWEnv(CVRPEnv):
         is_station = td["action"][:, None] >= station_index
         is_depot = td["action"][:, None] == 0
 
-        charging_percentage = 1 - td["current_fuel"]/self.generator.max_fuel
-
         # update current_time
         distance = gather_by_index(td["distances"], td["action"]).reshape([batch_size, 1])
+        charging_percentage = 1 - (td["current_fuel"]-distance)/self.generator.max_fuel
         duration = gather_by_index(td["durations"], td["action"]).reshape([batch_size, 1])
         duration[is_station] *= charging_percentage[is_station]  # Recharge time at station
 
@@ -218,7 +217,7 @@ class EVRPTWEnv(CVRPEnv):
         n_loc = td["demand"].size(-1)  # Excludes depot
 
         # Not selected_demand is demand of first node (by clamp) so incorrect for nodes that visit depot!
-        selected_demand = gather_by_index(
+        selected_demand = ~is_station*gather_by_index(
             td["demand"], torch.clamp(current_node - 1, 0, n_loc - 1), squeeze=False
         )
 
