@@ -10,7 +10,7 @@ from rl4co.utils.pylogger import get_pylogger
 log = get_pylogger(__name__)
 
 
-def render(td, actions=None, ax=None):
+def render(td, actions=None, ax=None, arr_col=None):
     num_routine = (actions == 0).sum().item() + 2
     base = colormaps["nipy_spectral"]
     color_list = base(np.linspace(0, 1, num_routine))
@@ -31,7 +31,7 @@ def render(td, actions=None, ax=None):
         td = td[0]
         actions = actions[0]
 
-    locs = td["locs"]
+    locs = td["locs"].clone()
     scale_demand = td["capacity"][0]
     demands = td["demand"] * scale_demand
 
@@ -59,7 +59,7 @@ def render(td, actions=None, ax=None):
         locs[0, 1],
         edgecolors=cm.Set2(2),
         facecolors="none",
-        s=100,
+        s=500,
         linewidths=2,
         marker="s",
         alpha=1,
@@ -71,7 +71,7 @@ def render(td, actions=None, ax=None):
         y[1:-num_station],
         edgecolors=cm.Set2(0),
         facecolors="none",
-        s=50,
+        s=500,
         linewidths=2,
         marker="o",
         alpha=1,
@@ -83,13 +83,28 @@ def render(td, actions=None, ax=None):
     y[-num_station:],
     edgecolors=cm.Set2(1),
     facecolors="none",
-    s=50,
+    s=500,
     linewidths=2,
     marker="^",
     alpha=1,
 )
 
-
+    bbox = ax.get_window_extent()
+    for i, (x, y) in enumerate(td['locs']):
+        # Convert the data coordinates to pixel coordinates relative to the axes
+        x_pixel, y_pixel = ax.transData.transform((x, y))
+        
+        # Normalize the pixel coordinates into the range [0, 1]
+        x_norm = (x_pixel-bbox.x0) / bbox.width
+        y_norm = (y_pixel-bbox.y0) / bbox.height
+        
+        # Place text at the normalized position (relative to the axes' size)
+        if i <= td['demand'].shape[-1]:
+            ax.text(x_norm, y_norm, i,
+                    transform=ax.transAxes, fontsize=8, color='black', ha='center', va='center')
+        else:
+            ax.text(x_norm, y_norm, i,
+                    transform=ax.transAxes, fontsize=8, color='black', ha='center', va='top')
     # plot demand bars
     # for node_idx in range(1, len(locs)-num_station):
     #     ax.add_patch(
@@ -115,36 +130,44 @@ def render(td, actions=None, ax=None):
     #         color=cm.Set2(0),
     #     )
 
-    # text depot
-    ax.text(
-        locs[0, 0],
-        locs[0, 1] - 0.025,
-        "Depot",
-        horizontalalignment="center",
-        verticalalignment="top",
-        fontsize=10,
-        color=cm.Set2(2),
-    )
+    # # text depot
+    # ax.text(
+    #     locs[0, 0],
+    #     locs[0, 1] - 0.025,
+    #     "Depot",
+    #     horizontalalignment="center",
+    #     verticalalignment="top",
+    #     fontsize=10,
+    #     color=cm.Set2(2),
+    # )
 
-    # plot actions
+    # plot actions arrow
     color_idx = 0
-    for action_idx in range(len(actions) - 1):
+    for action_idx in range(1, len(actions) - 1):
         if actions[action_idx] == 0:
             color_idx += 1
         from_loc = locs[actions[action_idx]]
         to_loc = locs[actions[action_idx + 1]]
-        ax.plot(
-            [from_loc[0], to_loc[0]],
-            [from_loc[1], to_loc[1]],
-            color=out(color_idx),
-            lw=1,
-        )
+        vector = to_loc - from_loc
+
+        # trim arrows
+        if np.linalg.norm(vector)>0.075:    
+            norm_vector = vector / np.linalg.norm(vector)
+            from_loc = from_loc + norm_vector * 0.03
+            to_loc = to_loc - norm_vector * 0.03
+            
+        # ax.plot(
+        #     [from_loc[0], to_loc[0]],
+        #     [from_loc[1], to_loc[1]],
+        #     color=out(color_idx),
+        #     lw=1,
+        # )
         ax.annotate(
             "",
             xy=(to_loc[0], to_loc[1]),
             xytext=(from_loc[0], from_loc[1]),
             arrowprops=dict(arrowstyle="-|>", color=out(color_idx)),
-            size=15,
+            size=10,
             annotation_clip=False,
         )
 
@@ -155,5 +178,7 @@ def render(td, actions=None, ax=None):
     min_y = flattened_locs[:, 1].min().item()
     max_y = flattened_locs[:, 1].max().item()
 
+    plt.axis('off')
+    
     # ax.set_xlim(min_x-0.05, max_x+0.05)
     # ax.set_ylim(min_y-0.05, max_y+0.05)
