@@ -196,9 +196,6 @@ def batch_milp(td, env, num_loc, num_station, num_ev, save=True, timelimit=60):
             for v in valid_actions
         ])
         
-        for act, td_instance in zip(actions_tensor, td_valid):
-            act_cust = act[(act>=1) & (act<=num_loc)] -1
-            td_instance['visited'][act_cust]=1
         rewards = env.get_reward(td_valid, actions_tensor.cuda())
         mean_reward = rewards.mean().item()
         avg_runtime = runtime/num_feasibles
