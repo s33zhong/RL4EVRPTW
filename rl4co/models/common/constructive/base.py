@@ -159,6 +159,7 @@ class ConstructivePolicy(nn.Module):
         td: TensorDict,
         env: Optional[Union[str, RL4COEnvBase]] = None,
         phase: str = "train",
+        feasibility_check: bool = False,
         calc_reward: bool = True,
         return_actions: bool = True,
         return_entropy: bool = False,
@@ -247,7 +248,10 @@ class ConstructivePolicy(nn.Module):
 
         # Output dictionary construction
         if calc_reward:
-            td.set("reward", env.get_reward(td, actions, train = True if phase=='train' else False))
+            td.set("reward", env.get_reward(td, 
+                                            actions, 
+                                            train = True if phase=='train' else False,
+                                            feasibility_check = feasibility_check))
 
         outdict = {
             "reward": td["reward"],

@@ -181,17 +181,18 @@ class EVRPTWContext(VRPContext):
         - remaining fuel
         - current time
     """
-
+ 
     def __init__(self, embed_dim):
         super(VRPContext, self).__init__(
-            embed_dim=embed_dim, step_context_dim=embed_dim + 3
+            embed_dim=embed_dim, step_context_dim=embed_dim + 4
         )
-
+ 
     def _state_embedding(self, embeddings, td):
         capacity = super()._state_embedding(embeddings, td)
         current_time = td["current_time"]
         current_fuel = td["current_fuel"]
-        return torch.cat([capacity, current_time, current_fuel], -1)
+        current_limit = td["current_limit"]
+        return torch.cat([capacity, current_time, current_fuel, current_limit], -1)
 
 
 class SVRPContext(EnvContext):

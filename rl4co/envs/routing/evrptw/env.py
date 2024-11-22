@@ -136,7 +136,9 @@ class EVRPTWEnv(CVRPEnv):
         time_to_loc = dist_to_loc / td["vehicle_speed"]
 
         exceeds_time = td["current_time"] + time_to_loc > td["time_windows"][..., 1]
-        exceeds_fuel = td["current_fuel"] - dist_to_loc < 0
+        dist_to_depot = get_distance(td["locs"][..., 0, :].unsqueeze(1), td["locs"])
+        exceeds_fuel = td["current_fuel"] - dist_to_loc - dist_to_depot < 0
+        # exceeds_fuel = td["current_fuel"] - dist_to_loc < 0
         # Nodes that cannot be visited are already visited or too much demand to be served now
         station_index = td["locs"].shape[-2] - td["stations"].shape[-2]
         num_station = td["stations"].shape[-2]
@@ -331,7 +333,7 @@ class EVRPTWEnv(CVRPEnv):
         td_reset.set("action_mask", self.get_action_mask(td_reset))
         return td_reset
 
-    def _get_reward(self, td: TensorDict, actions: torch.Tensor, train: bool = False,
+    def _get_reward(self, td: TensorDict, actions: torch.Tensor, train: bool = False, feasibility_check = False,
                     beta_1: int = 1, beta_2: int = 10000) -> torch.Tensor:
         """The reward is the negative tour length minus the cost
         of invoking additional EVs (beyond limit)."""
@@ -348,7 +350,12 @@ class EVRPTWEnv(CVRPEnv):
         if train:
             return negative_tour_length + ev_cost.squeeze() + unvisited_cost.squeeze()
         else:
-            return negative_tour_length
+            if feasibility_check:
+                limit_violate = (td['current_limit'] < 0)
+                ev_violation_cost = -beta_2 * limit_violate
+                return negative_tour_length + ev_violation_cost.squeeze() + unvisited_cost.squeeze()
+            else:
+                return negative_tour_length
 
     def calculate_time_penalty(self, info):
         """Calculate penalty for time window violations."""
