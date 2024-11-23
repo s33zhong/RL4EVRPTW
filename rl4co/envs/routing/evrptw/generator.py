@@ -157,7 +157,7 @@ class EVRPTWGenerator(CVRPGenerator):
         min_times[..., :, 0] = 0.0
         min_times[..., :, -self.num_station:] = 0.0
         max_times[..., :, 0] = self.horizon
-        max_times[..., :, -self.num_station:] = self.horizon
+        # max_times[..., :, -self.num_station:] = self.horizon
 
         # 6. stack to tensor time_windows
         time_windows = torch.stack((min_times, max_times), dim=-1)

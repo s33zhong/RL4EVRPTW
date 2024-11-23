@@ -120,8 +120,72 @@ class EVRPTWEnv(CVRPEnv):
                 time_windows=time_windows,
             )
 
-    @staticmethod
-    def get_action_mask(td: TensorDict) -> torch.Tensor:
+    # @staticmethod
+    # def get_action_mask(td: TensorDict) -> torch.Tensor:
+    #     """In addition to the constraints considered in the CVRPEnv, the time windows are considered.
+    #     The vehicle can only visit a location if it can reach it in time, i.e. before its time window ends.
+    #     Also, the vehicle can only visit a location if it has enough fuel to reach it.
+    #     """
+    #     # For demand steps_dim is inserted by indexing with id, for used_capacity insert node dim for broadcasting
+    #     exceeds_cap = td["demand"] + td["used_capacity"] > td["vehicle_capacity"]
+
+    #     current_loc = gather_by_index(td["locs"], td["current_node"])
+    #     # Calculate the distance to each location
+    #     dist_to_loc = get_distance(current_loc[..., None, :], td["locs"])
+    #     # Calculate the time to each location
+    #     time_to_loc = dist_to_loc / td["vehicle_speed"]
+
+    #     exceeds_time = td["current_time"] + time_to_loc > td["time_windows"][..., 1]
+    #     dist_to_depot = get_distance(td["locs"][..., 0, :].unsqueeze(1), td["locs"])
+    #     exceeds_fuel = td["current_fuel"] - dist_to_loc - dist_to_depot < 0
+    #     # exceeds_fuel = td["current_fuel"] - dist_to_loc < 0
+    #     # Nodes that cannot be visited are already visited or too much demand to be served now
+    #     station_index = td["locs"].shape[-2] - td["stations"].shape[-2]
+    #     num_station = td["stations"].shape[-2]
+
+    #     mask_loc = (td["visited"].to(exceeds_cap.dtype)
+    #                 | exceeds_cap
+    #                 | exceeds_time[..., 1:station_index]
+    #                 | exceeds_fuel[..., 1:station_index])
+        
+    #     # print("mask_loc: ", mask_loc)
+    #     unserved_reachable = ((mask_loc == 0).int().sum(-1) > 0)[:, None]
+    #     # print("Unserved reachable: ", unserved_reachable)
+
+    #     # Cannot visit the depot if there are unserved nodes reachable and the vehicle limit is reached
+    #     mask_depot = (unserved_reachable
+    #                   | exceeds_fuel[..., None, 0]
+    #                   | exceeds_time[..., None, 0]).to(mask_loc.dtype)
+        
+    #     # Cannot visit a station if just visited a station and still unserved nodes reachable
+    #     # For exceeds_fur station, it doesn't consider the dist_to_depot as after visitinig station,
+    #     # its fuel will be fully charged.
+    #     exceeds_fuel_for_station = td["current_fuel"] - dist_to_loc < 0
+    #     mask_station = ((td["current_node"] >= station_index & unserved_reachable)
+    #                     | exceeds_fuel_for_station[..., station_index:]
+    #                     | exceeds_time[..., station_index:])
+    #     mask_station = mask_station.expand(-1, num_station).to(mask_loc.dtype)  # Expand to match the number of stations
+    #     # print("mask_station: ", mask_station)
+
+    #     not_masked = ~torch.cat((mask_depot, mask_loc, mask_station), -1)
+
+    #     # Mask the current node (whether station, or regular location)
+    #     # Get indices for rows where `td["current_node"]` is not 0
+    #     non_zero_mask = td["current_node"] != 0
+    #     indices_to_scatter = td["current_node"][non_zero_mask]
+    #     # Select rows where td["current_node"] is not 0
+    #     rows = torch.arange(td["current_node"].size(0))[non_zero_mask.squeeze().cpu()]
+
+    #     # Scatter 0 at specified indices in not_masked
+    #     not_masked[rows, indices_to_scatter.squeeze(-1)] = 0
+
+    #     td.update({"current_loc": current_loc, "distances": dist_to_loc})
+    #     # print(f"visitable: {not_masked}, visited: {td['visited']}, current node: {td['current_node']}")
+
+    #     return not_masked
+
+    # James recent
+    def get_action_mask(self, td: TensorDict) -> torch.Tensor:
         """In addition to the constraints considered in the CVRPEnv, the time windows are considered.
         The vehicle can only visit a location if it can reach it in time, i.e. before its time window ends.
         Also, the vehicle can only visit a location if it has enough fuel to reach it.
@@ -132,13 +196,13 @@ class EVRPTWEnv(CVRPEnv):
         current_loc = gather_by_index(td["locs"], td["current_node"])
         # Calculate the distance to each location
         dist_to_loc = get_distance(current_loc[..., None, :], td["locs"])
+        dist_to_depot = get_distance(td["locs"][..., 0, :].unsqueeze(1), td["locs"])
         # Calculate the time to each location
         time_to_loc = dist_to_loc / td["vehicle_speed"]
 
-        exceeds_time = td["current_time"] + time_to_loc > td["time_windows"][..., 1]
-        dist_to_depot = get_distance(td["locs"][..., 0, :].unsqueeze(1), td["locs"])
+        exceeds_time = (td["current_time"] + time_to_loc > td["time_windows"][..., 1])
+        exceeds_fuel_station = td["current_fuel"] - dist_to_loc < 0
         exceeds_fuel = td["current_fuel"] - dist_to_loc - dist_to_depot < 0
-        # exceeds_fuel = td["current_fuel"] - dist_to_loc < 0
         # Nodes that cannot be visited are already visited or too much demand to be served now
         station_index = td["locs"].shape[-2] - td["stations"].shape[-2]
         num_station = td["stations"].shape[-2]
@@ -147,35 +211,212 @@ class EVRPTWEnv(CVRPEnv):
                     | exceeds_cap
                     | exceeds_time[..., 1:station_index]
                     | exceeds_fuel[..., 1:station_index])
+        
         unserved_reachable = ((mask_loc == 0).int().sum(-1) > 0)[:, None]
-        # print("Unserved reachable: ", unserved_reachable)
-
-        # Cannot visit the depot if there are unserved nodes reachable and the vehicle limit is reached
+        # Cannot visit the depot if there are unserved nodes reachable and the last node is the depot
         mask_depot = (unserved_reachable
                       | exceeds_fuel[..., None, 0]
                       | exceeds_time[..., None, 0]).to(mask_loc.dtype)
-        # Cannot visit a station if just visited a station and still unserved nodes reachable
-        mask_station = ((td["current_node"] >= station_index & unserved_reachable)
-                        | exceeds_fuel[..., station_index:]
+        # print(f"mask_depot: {mask_depot}")
+        
+        # Cannot visit a station if just visited a station
+        max_fuel = torch.full_like(td["current_fuel"], self.generator.max_fuel)
+        is_max_fuel = td["current_fuel"] == max_fuel
+        mask_station = (is_max_fuel
+                        | exceeds_fuel_station[..., station_index:]
                         | exceeds_time[..., station_index:])
         mask_station = mask_station.expand(-1, num_station).to(mask_loc.dtype)  # Expand to match the number of stations
 
         not_masked = ~torch.cat((mask_depot, mask_loc, mask_station), -1)
 
-        # Mask the current node (whether station, or regular location)
-        # Get indices for rows where `td["current_node"]` is not 0
-        non_zero_mask = td["current_node"] != 0
-        indices_to_scatter = td["current_node"][non_zero_mask]
-        # Select rows where td["current_node"] is not 0
-        rows = torch.arange(td["current_node"].size(0))[non_zero_mask.squeeze().cpu()]
-
-        # Scatter 0 at specified indices in not_masked
-        not_masked[rows, indices_to_scatter.squeeze(-1)] = 0
-
         td.update({"current_loc": current_loc, "distances": dist_to_loc})
-        # print(f"visitable: {not_masked}, visited: {td['visited']}, current node: {td['current_node']}")
-
+        # print(f"\nvisitable: {not_masked}, visited: {td['visited']}, current node: {td['current_node']}")
+        # print(f"\nCurrent time: {td['current_time']}, current fuel: {td['current_fuel']}")
+        # print(f"\nExceeds cap: {exceeds_cap}, exceeds time: {exceeds_time[..., None, 0]}, exceeds fuel: {exceeds_fuel[..., None, 0]}")
+        # print(f"\nUnserved reachable: {unserved_reachable}, currently at depot: {td['current_node']==0}, mask depot: {mask_depot}")
         return not_masked
+
+
+    # # For without masking
+    # # @staticmethod
+    # # def get_action_mask(td: TensorDict) -> torch.Tensor:
+    # #     """In addition to the constraints considered in the CVRPEnv, the time windows are considered.
+    # #     The vehicle can only visit a location if it can reach it in time, i.e. before its time window ends.
+    # #     Also, the vehicle can only visit a location if it has enough fuel to reach it.
+    # #     """
+    # #     # For demand steps_dim is inserted by indexing with id, for used_capacity insert node dim for broadcasting
+    # #     exceeds_cap = td["demand"] + td["used_capacity"] > td["vehicle_capacity"]
+
+    # #     current_loc = gather_by_index(td["locs"], td["current_node"])
+    # #     # Calculate the distance to each location
+    # #     dist_to_loc = get_distance(current_loc[..., None, :], td["locs"])
+    # #     # Calculate the time to each location
+    # #     time_to_loc = dist_to_loc / td["vehicle_speed"]
+
+    # #     exceeds_time = td["current_time"] + time_to_loc > td["time_windows"][..., 1]
+    # #     dist_to_depot = get_distance(td["locs"][..., 0, :].unsqueeze(1), td["locs"])
+    # #     exceeds_fuel = td["current_fuel"] - dist_to_loc - dist_to_depot < 0
+    # #     # exceeds_fuel = td["current_fuel"] - dist_to_loc < 0
+    # #     # Nodes that cannot be visited are already visited or too much demand to be served now
+    # #     station_index = td["locs"].shape[-2] - td["stations"].shape[-2]
+    # #     num_station = td["stations"].shape[-2]
+
+    # #     # mask_loc = (td["visited"].to(exceeds_cap.dtype)
+    # #     #             | exceeds_cap
+    # #     #             | exceeds_time[..., 1:station_index]
+    # #     #             | exceeds_fuel[..., 1:station_index])
+
+    # #     # mask_loc = (td["visited"].to(exceeds_cap.dtype)
+    # #     #             | exceeds_cap
+    # #     #             | exceeds_time[..., 1:station_index]
+    # #     #             | exceeds_fuel[..., 1:station_index])
+    # #     mask_loc = (td["visited"].to(exceeds_cap.dtype))
+        
+    # #     print("mask_loc: ", mask_loc)
+    # #     # unserved_reachable = ((mask_loc == 0).int().sum(-1) > 0)[:, None]
+    # #     # print("Unserved reachable: ", unserved_reachable)
+
+    # #     # # Cannot visit the depot if there are unserved nodes reachable and the vehicle limit is reached
+    # #     # mask_depot = (unserved_reachable
+    # #     #               | exceeds_fuel[..., None, 0]
+    # #     #               | exceeds_time[..., None, 0]).to(mask_loc.dtype)
+        
+    # #     # # Cannot visit a station if just visited a station and still unserved nodes reachable
+    # #     # # For exceeds_fur station, it doesn't consider the dist_to_depot as after visitinig station,
+    # #     # # its fuel will be fully charged.
+    # #     # exceeds_fuel_for_station = td["current_fuel"] - dist_to_loc < 0
+    # #     # mask_station = ((td["current_node"] >= station_index & unserved_reachable)
+    # #     #                 | exceeds_fuel_for_station[..., station_index:]
+    # #     #                 | exceeds_time[..., station_index:])
+    # #     # mask_station = mask_station.expand(-1, num_station).to(mask_loc.dtype)  # Expand to match the number of stations
+    # #     # # print("mask_station: ", mask_station)
+
+    # #     # not_masked = ~torch.cat((mask_depot, mask_loc, mask_station), -1)
+    # #     not_masked = ~mask_loc
+
+    # #     # Mask the current node (whether station, or regular location)
+    # #     # Get indices for rows where `td["current_node"]` is not 0
+    # #     non_zero_mask = td["current_node"] != 0
+    # #     indices_to_scatter = td["current_node"][non_zero_mask]
+    # #     # Select rows where td["current_node"] is not 0
+    # #     rows = torch.arange(td["current_node"].size(0))[non_zero_mask.squeeze().cpu()]
+
+    # #     # Scatter 0 at specified indices in not_masked
+    # #     not_masked[rows, indices_to_scatter.squeeze(-1)] = 0
+
+    # #     td.update({"current_loc": current_loc, "distances": dist_to_loc})
+    # #     # print(f"visitable: {not_masked}, visited: {td['visited']}, current node: {td['current_node']}")
+
+    # #     return not_masked
+
+    # def _step(self, td: TensorDict) -> TensorDict:
+    #     """In addition to the calculations in the CVRPEnv, the current time is
+    #     updated to keep track of which nodes are still reachable in time.
+    #     The current_node is updated in the parent class' _step() function.
+    #     """
+    #     batch_size = td["locs"].shape[0]
+    #     # Check if the action is visiting a station
+    #     station_index = td["locs"].shape[-2] - td["stations"].shape[-2]
+    #     is_station = td["action"][:, None] >= station_index
+    #     is_depot = td["action"][:, None] == 0
+
+    #     # update current_time
+    #     distance = gather_by_index(td["distances"], td["action"]).reshape([batch_size, 1])
+    #     charging_percentage = 1 - (td["current_fuel"] - distance)/self.generator.max_fuel
+    #     duration = gather_by_index(td["durations"], td["action"]).reshape([batch_size, 1])
+    #     duration[is_station] *= charging_percentage[is_station]  # Recharge time at station
+
+    #     time_to_loc = distance / td["vehicle_speed"]  # Time to reach the location
+
+    #     start_times = gather_by_index(td["time_windows"], td["action"])[..., 0].reshape([batch_size, 1])
+    #     end_times = gather_by_index(td["time_windows"], td["action"])[..., 1].reshape([batch_size, 1])
+    #     current_time = torch.where(is_depot,
+    #                                self.generator.min_time,  # Reset time to 0 at depot
+    #                                torch.max(td["current_time"] + time_to_loc, start_times) + duration)
+        
+    #     # Calculate time penalty: if current_time exceeds end_time, compute the violation amount
+    #     penalty_time = torch.max(torch.zeros_like(current_time), current_time - end_times).sum(dim=1, keepdim=True)
+
+    #     # If visiting a station, replenish the fuel to max fuel, otherwise deduct fuel based on distance
+    #     current_fuel = torch.where((is_station | is_depot),
+    #                                self.generator.max_fuel,  # Full fuel replenishment at station
+    #                                td["current_fuel"] - distance)  # Deduct fuel based on distance traveled)
+        
+    #     # Calculate battery penalty: if current_fuel goes below zero, compute the violation amount
+    #     penalty_battery = torch.max(torch.zeros_like(current_fuel), -current_fuel).sum(dim=1, keepdim=True)
+
+    #     # current_node is updated to the selected action
+    #     current_node = td["action"][:, None]  # Add dimension for step
+    #     # print("Current node in step(): ", current_node)
+    #     n_loc = td["demand"].size(-1)  # Excludes depot
+
+    #     # Not selected_demand is demand of first node (by clamp) so incorrect for nodes that visit depot!
+    #     selected_demand = gather_by_index(
+    #         td["demand"], torch.clamp(current_node - 1, 0, n_loc - 1), squeeze=False
+    #     )
+
+    #     # Increase used capacity if depot is not visited, otherwise set to 0
+    #     used_capacity = torch.where(is_depot,
+    #                                 0.0,
+    #                                 (td["used_capacity"] + selected_demand)).float()
+
+    #     # Calculate cargo penalty: if used_capacity exceeds vehicle capacity, compute the violation amount
+    #     penalty_cargo = torch.max(torch.zeros_like(used_capacity), used_capacity - td["vehicle_capacity"]).sum(dim=1, keepdim=True)
+
+    #     # Note: here we do not subtract one as we have to scatter so the first column allows scattering depot
+    #     # Add one dimension since we write a single value
+    #     visited = td["visited"]
+
+    #     # Create a mask tensor where it is 1 if current_node is within the range of visited, 0 otherwise
+    #     valid_mask = (current_node > 0) & (current_node <= visited.size(-1))
+
+    #     # Set update_tensor values to 1 at the specified positions
+    #     update_tensor = torch.zeros_like(visited)
+
+    #     # update_tensor.scatter_(-1, current_node[valid_mask].unsqueeze(-1)-1, 1)
+    #     rows = torch.arange(valid_mask.size(0))[valid_mask.squeeze(-1).cpu()]
+    #     cols = (current_node[valid_mask] - 1).squeeze(-1)
+    #     update_tensor[rows, cols] = 1
+
+    #     # Perform element-wise max to get the resulting visited tensor
+    #     visited = torch.max(visited, update_tensor)
+
+    #     # Considered finished, if visited all customers
+    #     finished = visited.sum(-1) == visited.size(-1)
+
+    #     # SECTION: get done
+    #     done = finished & is_depot.squeeze()
+    #     reward = torch.zeros_like(done)
+
+    #     # If visiting a depot, deduct one from current vehicle limit if it is not done
+    #     current_limit = td["current_limit"]
+
+    #     # Setting a hard limit (minus 10) to vehicles; if limit is reached, the instance has failed and thus done
+    #     done = done | (current_limit <= -10).squeeze()
+
+    #     # If depot is visited, deduct one from the limit if not done yet; we allow the vehicle to remain in depot
+    #     #    if it has finished all its tasks, or it has already failed
+    #     current_limit[is_depot & ~done.unsqueeze(1)] -= 1
+
+    #     td.update(
+    #         {
+    #             "current_node": current_node,
+    #             "current_fuel": current_fuel,
+    #             "current_time": current_time,
+    #             "current_limit": current_limit,
+    #             "used_capacity": used_capacity,
+    #             "visited": visited,
+    #             "finished": finished,
+    #             "reward": reward,
+    #             "done": done,
+    #             "penalty_time": penalty_time,
+    #             "penalty_battery": penalty_battery,
+    #             "penalty_cargo": penalty_cargo,
+    #         }
+    #     )
+    #     td.set("action_mask", self.get_action_mask(td))
+    #     return td
+
 
     def _step(self, td: TensorDict) -> TensorDict:
         """In addition to the calculations in the CVRPEnv, the current time is
@@ -190,7 +431,7 @@ class EVRPTWEnv(CVRPEnv):
 
         # update current_time
         distance = gather_by_index(td["distances"], td["action"]).reshape([batch_size, 1])
-        charging_percentage = 1 - (td["current_fuel"]-distance)/self.generator.max_fuel
+        charging_percentage = 1 - (td["current_fuel"] - distance)/self.generator.max_fuel
         duration = gather_by_index(td["durations"], td["action"]).reshape([batch_size, 1])
         duration[is_station] *= charging_percentage[is_station]  # Recharge time at station
 
@@ -219,7 +460,7 @@ class EVRPTWEnv(CVRPEnv):
         n_loc = td["demand"].size(-1)  # Excludes depot
 
         # Not selected_demand is demand of first node (by clamp) so incorrect for nodes that visit depot!
-        selected_demand = ~is_station*gather_by_index(
+        selected_demand = gather_by_index(
             td["demand"], torch.clamp(current_node - 1, 0, n_loc - 1), squeeze=False
         )
 
@@ -284,6 +525,7 @@ class EVRPTWEnv(CVRPEnv):
         )
         td.set("action_mask", self.get_action_mask(td))
         return td
+    
 
     def _reset(
         self, td: Optional[TensorDict] = None, batch_size: Optional[list] = None
@@ -332,7 +574,7 @@ class EVRPTWEnv(CVRPEnv):
         )
         td_reset.set("action_mask", self.get_action_mask(td_reset))
         return td_reset
-
+    
     def _get_reward(self, td: TensorDict, actions: torch.Tensor, train: bool = False, feasibility_check = False,
                     beta_1: int = 1, beta_2: int = 10000) -> torch.Tensor:
         """The reward is the negative tour length minus the cost
