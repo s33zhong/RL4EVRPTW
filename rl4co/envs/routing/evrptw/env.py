@@ -407,59 +407,59 @@ class EVRPTWEnv(CVRPEnv):
         
         return penalty_cargo
     
-    # @staticmethod
-    # def check_solution_validity(td: TensorDict, actions: torch.Tensor) -> None:
-    #     # print("Actions are: ", actions)
-    #     # print("To be implemented.")
-    #     # CVRPEnv.check_solution_validity(td, actions)
-    #     # batch_size = td["locs"].shape[0]
-    #     # # distances to depot
-    #     # distances = get_distance(
-    #     #     td["locs"][..., 0, :], td["locs"].transpose(0, 1)
-    #     # ).transpose(0, 1)
-    #     # # basic checks on time windows
-    #     # assert torch.all(distances >= 0.0), "Distances must be non-negative."
-    #     # assert torch.all(td["time_windows"] >= 0.0), "Time windows must be non-negative."
-    #     # assert torch.all(
-    #     #     td["time_windows"][..., :, 0] + distances + td["durations"]
-    #     #     <= td["time_windows"][..., 0, 1][0]  # max_time is the same for all batches
-    #     # ), "vehicle cannot perform service and get back to depot in time."
-    #     # assert torch.all(
-    #     #     td["durations"] >= 0.0
-    #     # ), "Service durations must be non-negative."
-    #     # assert torch.all(
-    #     #     td["time_windows"][..., 0] < td["time_windows"][..., 1]
-    #     # ), "there are unfeasible time windows"
-    #     # assert torch.all(
-    #     #     td["current_fuel"] >= 0
-    #     # ), "There are unreachable locations due to fuel limit."
-    #     # # check vehicles can meet deadlines
-    #     # curr_time = torch.zeros(batch_size, 1, dtype=torch.float32, device=td.device)
-    #     # curr_node = torch.zeros_like(curr_time, dtype=torch.int64, device=td.device)
-    #     # for ii in range(actions.size(1)):
-    #     #     next_node = actions[:, ii]
-    #     #     dist = get_distance(
-    #     #         gather_by_index(td["locs"], curr_node).reshape([batch_size, 2]),
-    #     #         gather_by_index(td["locs"], next_node).reshape([batch_size, 2]),
-    #     #     ).reshape([batch_size, 1])
-    #     #     curr_time = torch.max(
-    #     #         (curr_time + dist).int(),
-    #     #         gather_by_index(td["time_windows"], next_node)[..., 0].reshape(
-    #     #             [batch_size, 1]
-    #     #         ),
-    #     #     )
-    #     #     assert torch.all(
-    #     #         curr_time
-    #     #         <= gather_by_index(td["time_windows"], next_node)[..., 1].reshape(
-    #     #             [batch_size, 1]
-    #     #         )
-    #     #     ), "vehicle cannot start service before deadline"
-    #     #     curr_time = curr_time + gather_by_index(td["durations"], next_node).reshape(
-    #     #         [batch_size, 1]
-    #     #     )
-    #     #     curr_node = next_node
-    #     #     curr_time[curr_node == 0] = 0.0  # reset time for depot
-    #     return
+    @staticmethod
+    def check_solution_validity(td: TensorDict, actions: torch.Tensor) -> None:
+        # print("Actions are: ", actions)
+        # print("To be implemented.")
+        # CVRPEnv.check_solution_validity(td, actions)
+        # batch_size = td["locs"].shape[0]
+        # # distances to depot
+        # distances = get_distance(
+        #     td["locs"][..., 0, :], td["locs"].transpose(0, 1)
+        # ).transpose(0, 1)
+        # # basic checks on time windows
+        # assert torch.all(distances >= 0.0), "Distances must be non-negative."
+        # assert torch.all(td["time_windows"] >= 0.0), "Time windows must be non-negative."
+        # assert torch.all(
+        #     td["time_windows"][..., :, 0] + distances + td["durations"]
+        #     <= td["time_windows"][..., 0, 1][0]  # max_time is the same for all batches
+        # ), "vehicle cannot perform service and get back to depot in time."
+        # assert torch.all(
+        #     td["durations"] >= 0.0
+        # ), "Service durations must be non-negative."
+        # assert torch.all(
+        #     td["time_windows"][..., 0] < td["time_windows"][..., 1]
+        # ), "there are unfeasible time windows"
+        # assert torch.all(
+        #     td["current_fuel"] >= 0
+        # ), "There are unreachable locations due to fuel limit."
+        # # check vehicles can meet deadlines
+        # curr_time = torch.zeros(batch_size, 1, dtype=torch.float32, device=td.device)
+        # curr_node = torch.zeros_like(curr_time, dtype=torch.int64, device=td.device)
+        # for ii in range(actions.size(1)):
+        #     next_node = actions[:, ii]
+        #     dist = get_distance(
+        #         gather_by_index(td["locs"], curr_node).reshape([batch_size, 2]),
+        #         gather_by_index(td["locs"], next_node).reshape([batch_size, 2]),
+        #     ).reshape([batch_size, 1])
+        #     curr_time = torch.max(
+        #         (curr_time + dist).int(),
+        #         gather_by_index(td["time_windows"], next_node)[..., 0].reshape(
+        #             [batch_size, 1]
+        #         ),
+        #     )
+        #     assert torch.all(
+        #         curr_time
+        #         <= gather_by_index(td["time_windows"], next_node)[..., 1].reshape(
+        #             [batch_size, 1]
+        #         )
+        #     ), "vehicle cannot start service before deadline"
+        #     curr_time = curr_time + gather_by_index(td["durations"], next_node).reshape(
+        #         [batch_size, 1]
+        #     )
+        #     curr_node = next_node
+        #     curr_time[curr_node == 0] = 0.0  # reset time for depot
+        return
 
     @staticmethod
     def render(td: TensorDict, actions: torch.Tensor = None, ax=None):
