@@ -194,9 +194,9 @@ class RewardConstrainedPOMO(REINFORCE):
         self.lambda_lrs = lambda_lrs
 
         # Initialize dynamic Lagrange multipliers (lambdas) for each constraint type
-        self.lambda1 = torch.tensor(0.0, requires_grad=False)  # Time window constraint
-        self.lambda2 = torch.tensor(0.0, requires_grad=False)  # Battery constraint
-        self.lambda3 = torch.tensor(0.0, requires_grad=False)  # Cargo capacity constraint
+        self.lambda1 = torch.tensor(1.0, requires_grad=False)  # Time window constraint
+        self.lambda2 = torch.tensor(1.0, requires_grad=False)  # Battery constraint
+        self.lambda3 = torch.tensor(1.0, requires_grad=False)  # Cargo capacity constraint
         
         if self.num_augment > 1:
             self.augment = StateAugmentation(

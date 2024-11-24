@@ -153,11 +153,11 @@ class EVRPTWGenerator(CVRPGenerator):
         max_times = torch.clamp(torch.max(tw_1+0.05, tw_2+0.05), max=upper_bound, min=lower_bound)
         min_times = torch.clamp(torch.min(tw_1-0.05, tw_2-0.05), max=max_times, min=torch.zeros_like(max_times))
 
-        # 5. set times for depot and stations; make them always available
+        # 5. set times for depot and stations; make them always available within the upper bound
         min_times[..., :, 0] = 0.0
         min_times[..., :, -self.num_station:] = 0.0
         max_times[..., :, 0] = self.horizon
-        # max_times[..., :, -self.num_station:] = self.horizon
+        max_times[..., :, -self.num_station:] = upper_bound[..., :, -self.num_station:]
 
         # 6. stack to tensor time_windows
         time_windows = torch.stack((min_times, max_times), dim=-1)
