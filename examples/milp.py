@@ -9,7 +9,7 @@ from gurobipy import GRB
 def check_within_ev_limit(actions, num_ev):
     return (actions == 0).sum().item() <= num_ev
 
-def milp_solver(td, env, alpha=1.0, beta=1.0, timelimit=60):
+def milp_solver(td, env, timelimit=60):
     """Variables for MILP Solver
 
     Vertices and Arcs
@@ -88,7 +88,7 @@ def milp_solver(td, env, alpha=1.0, beta=1.0, timelimit=60):
     c = model.addVars(Vp, vtype=GRB.CONTINUOUS, lb=0, ub=C, name='c')
     b = model.addVars(Vp, vtype=GRB.CONTINUOUS, lb=0, ub=Q, name='b')
 
-    obj = gp.quicksum(alpha*a[0,j] for j in Vp[1:-1]) + gp.quicksum(beta*D[(i,j)] * a[i, j] for i in Vp[:-1] for j in Vp[1:] if i!=j)
+    obj = gp.quicksum(D[(i,j)] * a[i, j] for i in Vp[:-1] for j in Vp[1:] if i!=j)
 
     model.setObjective(obj, GRB.MINIMIZE)
     
@@ -108,6 +108,7 @@ def milp_solver(td, env, alpha=1.0, beta=1.0, timelimit=60):
     model.addConstr(tau[0] == 0)
     model.addConstr(c[0] == C)
     model.addConstr(b[0] == Q)
+    model.addConstr(gp.quicksum(a[0, j] for j in Vp[1:-1]) <= env.generator.vehicle_limit)
     
     model.setParam('TimeLimit', timelimit)
     model.optimize()
@@ -158,7 +159,7 @@ def batch_milp(td, env, num_loc, num_station, num_ev, save=True, timelimit=60):
     for i in range(td.shape[0]):
         print(f"\nProcessing instance {i+1}/{td.shape[0]} of C{num_loc}-S{num_station}-EV{num_ev}\n")
         
-        result = milp_solver(td[i], env, timelimit=timelimit, beta=0.1)
+        result = milp_solver(td[i], env, timelimit=timelimit)
         
         action = result['actions']
         actions[i] = action
