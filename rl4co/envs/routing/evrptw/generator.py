@@ -39,6 +39,7 @@ class EVRPTWGenerator(CVRPGenerator):
             capacity [batch_size, 1]: capacity of the vehicle
             durations [batch_size, num_loc]: service durations of each location
             time_windows [batch_size, num_loc, 2]: time windows of each location
+            infeasibility [batch_size, num_loc]: infeasibility check for soft mask
     """
 
     def __init__(
@@ -162,6 +163,14 @@ class EVRPTWGenerator(CVRPGenerator):
         # 6. stack to tensor time_windows
         time_windows = torch.stack((min_times, max_times), dim=-1)
 
+        # 7. Infeasibility check for soft masking
+        infeasibility = torch.zeros(*batch_size, 1).bool()
+
+        # 8. Penalties
+        penalty_time = torch.zeros(*batch_size, 1)
+        penalty_battery = torch.zeros(*batch_size, 1)
+        penalty_cargo = torch.zeros(*batch_size, 1)
+
         assert torch.all(
             min_times < max_times
         ), "Please make sure the relation between max_loc and max_time allows for feasible solutions."
@@ -187,6 +196,10 @@ class EVRPTWGenerator(CVRPGenerator):
                 "capacity": capacity,
                 "durations": durations,
                 "time_windows": time_windows,
+                "infeasibility": infeasibility,
+                "penalty_time": penalty_time,
+                "penalty_battery": penalty_battery,
+                "penalty_cargo": penalty_cargo,                
             },
             batch_size=batch_size,
         )

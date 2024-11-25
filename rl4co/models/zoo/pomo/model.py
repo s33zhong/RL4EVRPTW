@@ -229,13 +229,18 @@ class RewardConstrainedPOMO(REINFORCE):
         out = self.policy(td, self.env, phase=phase, num_starts=n_start)
 
         # Unbatchify reward to [batch_size, num_augment, num_starts]
-        reward = unbatchify(out["reward"], (n_aug, n_start))
 
-        # Apply penalty to reward based on constraint violation
-        penalty, penalties = self.compute_penalty(out)  # Calculate penalties and individual constraints
-        penalized_reward = reward - (self.lambda1 * penalties["time"].view_as(reward) +
-                                     self.lambda2 * penalties["battery"].view_as(reward) +
-                                     self.lambda3 * penalties["cargo"].view_as(reward))
+        # print('out["reward"]', out["reward"].shape)
+        reward = unbatchify(out["reward"], (n_aug, n_start))
+        # print('reward.shape', reward.shape)
+        time_penalty = unbatchify(out["penalty_time"].squeeze(-1), (n_aug, n_start))
+        battery_penalty = unbatchify(out["penalty_battery"].squeeze(-1), (n_aug, n_start))
+        cargo_penalty = unbatchify(out["penalty_cargo"].squeeze(-1), (n_aug, n_start))
+        total_penalty = (self.lambda1 * time_penalty +
+                         self.lambda2 * battery_penalty +
+                         self.lambda3 * cargo_penalty)
+        
+        penalized_reward = reward - total_penalty
         
         # Training phase
         if phase == "train":
@@ -246,9 +251,9 @@ class RewardConstrainedPOMO(REINFORCE):
             out.update({"max_reward": max_reward})
 
             # Update each lambda based on its specific penalty
-            avg_penalty_time = penalties["time"].mean().item()
-            avg_penalty_battery = penalties["battery"].mean().item()
-            avg_penalty_cargo = penalties["cargo"].mean().item()
+            avg_penalty_time = time_penalty.mean().item()
+            avg_penalty_battery = battery_penalty.mean().item()
+            avg_penalty_cargo = cargo_penalty.mean().item()
 
             # Update lambda1 (time), lambda2 (battery), and lambda3 (cargo)
             self.lambda1 = max(0, self.lambda1 + self.lambda_lrs["time"] * (avg_penalty_time - self.constraint_thresholds["time"]))

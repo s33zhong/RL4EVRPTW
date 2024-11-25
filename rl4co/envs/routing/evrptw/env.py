@@ -173,20 +173,62 @@ class EVRPTWEnv(CVRPEnv):
             # print(f"\nUnserved reachable: {unserved_reachable}, currently at depot: {td['current_node']==0}, mask depot: {mask_depot}")
             return not_masked
         else:
+            # # Infeasibility check 
+            # # 1. Time
+            # # 2. Battery
+            # # 3. Cargo
+            exceeds_cap = td["demand"] + td["used_capacity"] > td["vehicle_capacity"]
             current_loc = gather_by_index(td["locs"], td["current_node"])
             dist_to_loc = get_distance(current_loc[..., None, :], td["locs"])
-            mask_loc = td["visited"].bool()
+            dist_to_depot = get_distance(td["locs"][..., 0, :].unsqueeze(1), td["locs"])
 
-            mask_depot = torch.zeros((mask_loc.shape[0], 1), dtype=mask_loc.dtype)
-            default_mask_station = torch.zeros((mask_loc.shape[0], td["stations"].shape[-2]), dtype=mask_loc.dtype)
+            time_to_loc = dist_to_loc / td["vehicle_speed"]
+
+            exceeds_time = (td["current_time"] + time_to_loc > td["time_windows"][..., 1])
+            exceeds_fuel_station = td["current_fuel"] - dist_to_loc < 0
+            exceeds_fuel = td["current_fuel"] - dist_to_loc - dist_to_depot < 0
+            # Nodes that cannot be visited are already visited or too much demand to be served now
+            station_index = td["locs"].shape[-2] - td["stations"].shape[-2]
+            num_station = td["stations"].shape[-2]
+
+            mask_loc = (td["visited"].to(exceeds_cap.dtype)
+                        | exceeds_cap
+                        | exceeds_time[..., 1:station_index]
+                        | exceeds_fuel[..., 1:station_index])
+            
+            mask_depot = (exceeds_fuel[..., None, 0]
+                        | exceeds_time[..., None, 0]).to(mask_loc.dtype)
+            
             # Cannot visit a station if just visited a station
             max_fuel = torch.full_like(td["current_fuel"], self.generator.max_fuel)
-            is_max_fuel = td["current_fuel"] == max_fuel
-            mask_station = (is_max_fuel.cpu() | default_mask_station)
-                            
-            not_masked = ~torch.cat((mask_depot, mask_loc.cpu(), mask_station), -1)
+            is_max_fuel = td["current_fuel"] == max_fuel    # exception for soft masking for infinite loop
+            mask_station = (is_max_fuel
+                            | exceeds_fuel_station[..., station_index:]
+                            | exceeds_time[..., station_index:])
+            mask_station = mask_station.expand(-1, num_station).to(mask_loc.dtype)  # Expand to match the number of stations
+
+            hard_masked = torch.cat((mask_depot, mask_loc, mask_station), -1)
+        
+            # Soft mask
+            mask_visited = td["visited"].bool()
+            soft_mask_depot = torch.zeros((mask_visited.shape[0], 1), dtype=mask_visited.dtype)
+            default_mask_station = torch.zeros((mask_visited.shape[0], td["stations"].shape[-2]), dtype=mask_visited.dtype)
+            soft_mask_station = (is_max_fuel.cpu() | default_mask_station)
+            soft_not_masked = ~torch.cat((soft_mask_depot, mask_visited.cpu(), soft_mask_station), -1)
+            
+            # Infeasibility check 
+            # 1. maksed_loc
+            # 2. current_node
+            # 3. infeasible = masked_loc == current_node
+            # 4. Update td.update({"infeasibility": infeasible})
+            batch_size = hard_masked.shape[0]
+            batch_indices = torch.arange(batch_size, device=hard_masked.device).unsqueeze(1)
+            current_node_indices = td["current_node"].long()
+            infeasible = hard_masked[batch_indices, current_node_indices]
+            td["infeasibility"] += infeasible
             td.update({"current_loc": current_loc, "distances": dist_to_loc})
-            return not_masked
+
+            return soft_not_masked
 
     
     def _step(self, td: TensorDict) -> TensorDict:
@@ -278,6 +320,14 @@ class EVRPTWEnv(CVRPEnv):
         #    if it has finished all its tasks, or it has already failed
         current_limit[is_depot & ~done.unsqueeze(1)] -= 1
 
+        # print('penalty_time', penalty_time)
+        # print('penalty_battery', penalty_battery)
+        # print('penalty_cargo', penalty_cargo)
+
+        td['penalty_time'] += penalty_time
+        td['penalty_battery'] += penalty_battery
+        td['penalty_cargo'] += penalty_cargo
+
         td.update(
             {
                 "current_node": current_node,
@@ -288,10 +338,10 @@ class EVRPTWEnv(CVRPEnv):
                 "visited": visited,
                 "finished": finished,
                 "reward": reward,
-                "done": done,
-                "penalty_time": penalty_time,
-                "penalty_battery": penalty_battery,
-                "penalty_cargo": penalty_cargo,
+                "done": done,  
+                # "penalty_time": penalty_time,
+                # "penalty_battery": penalty_battery,
+                # "penalty_cargo": penalty_cargo, 
             }
         )
         # td.set("action_mask", self.get_action_mask(td))
@@ -340,7 +390,11 @@ class EVRPTWEnv(CVRPEnv):
                     *batch_size, 1, dtype=torch.uint8, device=device
                 ),  # Whether the vehicle has met the demand of all customers
                 "durations": td["durations"],
-                "time_windows": td["time_windows"],
+                "time_windows": td["time_windows"],                
+                "infeasibility": torch.zeros(*batch_size, 1).bool(),
+                "penalty_time": torch.zeros(*batch_size, 1),
+                "penalty_battery": torch.zeros(*batch_size, 1),
+                "penalty_cargo": torch.zeros(*batch_size, 1),      
             },
             batch_size=batch_size,
         )
