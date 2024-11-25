@@ -254,6 +254,10 @@ class ConstructivePolicy(nn.Module):
                                             feasibility_check = feasibility_check))
 
         outdict = {
+            "infeasibility": td["infeasibility"],
+            "penalty_time": td["penalty_time"],
+            "penalty_battery": td["penalty_battery"],
+            "penalty_cargo": td["penalty_cargo"],
             "reward": td["reward"],
             "log_likelihood": get_log_likelihood(
                 logprobs, actions, td.get("mask", None), return_sum_log_likelihood
