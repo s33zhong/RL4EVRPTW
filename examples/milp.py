@@ -222,7 +222,7 @@ def check_actions_with_mask(td, env, actions, display_errors=False):
 
     invalid_results = []
     for k, act in actions.items():
-        if act.tolist().count(0)<=env.generator.vehicle_limit:
+        if act is not None and act.tolist().count(0)<=env.generator.vehicle_limit:
             check_count+=1
             success, fail_id = check_visited(td, act, k)
             if not success:
