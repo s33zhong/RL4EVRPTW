@@ -128,6 +128,7 @@ class EVRPTWEnv(CVRPEnv):
         Also, the vehicle can only visit a location if it has enough fuel to reach it.
         """
         if not soft:
+            # print('hard called')
             # For demand steps_dim is inserted by indexing with id, for used_capacity insert node dim for broadcasting
             exceeds_cap = td["demand"] + td["used_capacity"] > td["vehicle_capacity"]
 
@@ -167,12 +168,14 @@ class EVRPTWEnv(CVRPEnv):
             not_masked = ~torch.cat((mask_depot, mask_loc, mask_station), -1)
 
             td.update({"current_loc": current_loc, "distances": dist_to_loc})
+            # print(f"\nvisitable.shape: {not_masked.shape}, visited: {td['visited'].shape}, current node: {td['current_node'].shape}")
             # print(f"\nvisitable: {not_masked}, visited: {td['visited']}, current node: {td['current_node']}")
             # print(f"\nCurrent time: {td['current_time']}, current fuel: {td['current_fuel']}")
             # print(f"\nExceeds cap: {exceeds_cap}, exceeds time: {exceeds_time[..., None, 0]}, exceeds fuel: {exceeds_fuel[..., None, 0]}")
             # print(f"\nUnserved reachable: {unserved_reachable}, currently at depot: {td['current_node']==0}, mask depot: {mask_depot}")
             return not_masked
         else:
+            # print('soft called')
             # # Infeasibility check 
             # # 1. Time
             # # 2. Battery
@@ -229,7 +232,6 @@ class EVRPTWEnv(CVRPEnv):
             td.update({"current_loc": current_loc, "distances": dist_to_loc})
 
             return soft_not_masked
-
     
     def _step(self, td: TensorDict) -> TensorDict:
         """In addition to the calculations in the CVRPEnv, the current time is
@@ -348,7 +350,6 @@ class EVRPTWEnv(CVRPEnv):
         td.set("action_mask", self.get_action_mask(td, self.soft))
         return td
     
-
     def _reset(
         self, td: Optional[TensorDict] = None, batch_size: Optional[list] = None
     ) -> TensorDict:
@@ -400,9 +401,9 @@ class EVRPTWEnv(CVRPEnv):
         )
         td_reset.set("action_mask", self.get_action_mask(td_reset))
         return td_reset
-    
+
     def _get_reward(self, td: TensorDict, actions: torch.Tensor, train: bool = False, feasibility_check = False,
-                    beta_1: int = 1, beta_2: int = 10000) -> torch.Tensor:
+                    beta_1: int = 1000, beta_2: int = 10000) -> torch.Tensor:
         """The reward is the negative tour length minus the cost
         of invoking additional EVs (beyond limit)."""
         # Energy consumption which is proportional to the distance traveled
@@ -424,7 +425,8 @@ class EVRPTWEnv(CVRPEnv):
                 # 2. EVs limit violoation
                 ev_violation_cost = -beta_2 * limit_violate
                 # 3. Time, Bettery, Cargo violation (done in the _step() function)
-                return negative_tour_length + ev_violation_cost.squeeze() + unvisited_cost.squeeze()
+                total_reward = negative_tour_length + ev_violation_cost.squeeze() + unvisited_cost.squeeze()
+                return total_reward
             else:
                 return negative_tour_length
 

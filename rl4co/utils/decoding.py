@@ -391,8 +391,11 @@ class DecodingStrategy(metaclass=abc.ABCMeta):
         """Select the action with the highest probability."""
         # [BS], [BS]
         selected = logprobs.argmax(dim=-1)
-        # print(selected)
-        # print(mask)
+        # print('mask',mask)
+        # print('selected', selected)
+        # print('selected.unsqueeze(-1)', selected.unsqueeze(-1))
+        # print('(~mask).gather(1, selected.unsqueeze(-1))', (~mask).gather(1, selected.unsqueeze(-1)))
+        # print('(~mask).gather(1, selected.unsqueeze(-1)).data.any()', (~mask).gather(1, selected.unsqueeze(-1)).data.any())
         if mask is not None:
             assert (
                 not (~mask).gather(1, selected.unsqueeze(-1)).data.any()
